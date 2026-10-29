@@ -52,12 +52,6 @@
     display: flex; flex-direction: column; align-items: center;
     gap: 20px;
   }
-  .heart {
-    display: block;
-    width: min(100%, 360px);
-    aspect-ratio: 1 / 0.9;
-    max-width: 100%;
-  }
   .cake { width: 168px; max-width: 60%; height: auto; overflow: visible; }
   .flame { transform-origin: 80px 46px; animation: flicker 1.6s ease-in-out infinite; transition: opacity .5s, transform .5s; }
   .glow { animation: breathe 2.4s ease-in-out infinite; transition: opacity .6s; }
@@ -180,8 +174,6 @@
 <canvas id="sky" aria-hidden="true"></canvas>
 
 <main class="card">
-  <canvas id="heart" class="heart" role="img" aria-label="Trái tim đang đập"></canvas>
-
   <h1>Chúc mừng sinh nhật</h1>
 
   <article class="letter">
@@ -300,21 +292,10 @@
   requestAnimationFrame(tick);
 
   // ---- beating particle heart (x = 16sin³t, y = 13cos t − 5cos 2t − 2cos 3t − cos 4t) ----
-  const hc = document.getElementById('heart');
-  const hx = hc.getContext('2d');
-  let HW = 0, HH = 0, S = 1, pts = [];
   const heartXY = t => [
     16 * Math.sin(t) ** 3,
     -(13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t))
   ];
-  const buildHeart = () => {
-    const r = Math.min(window.devicePixelRatio || 1, 2);
-    HW = hc.clientWidth; HH = hc.clientHeight;
-    hc.width = HW * r; hc.height = HH * r;
-    hx.setTransform(r, 0, 0, r, 0, 0);
-    S = Math.min(HW / 40, HH / 36);
-    pts = buildPoints(700, 1800, 1);
-  };
   // points in heart units: the outline, particles bleeding inward from it, then a soft fill toward the centre
   function buildPoints(edgeN, fillN, size) {
     const out = [], edge = [];
@@ -336,44 +317,12 @@
     }
     return out;
   }
-  buildHeart();
-  addEventListener('resize', buildHeart);
-
   const beatAt = ms => {
     const p = (ms % 1100) / 1100;          // one beat every 1.1 s
     const lub = Math.exp(-((p - .18) ** 2) / .004);
     const dub = Math.exp(-((p - .38) ** 2) / .006) * .6;
     return lub + dub;
   };
-  const drawHeart = ms => {
-    const b = reduce ? 0 : beatAt(ms);
-    const cx = HW / 2, cy = HH / 2 - 2.5 * S;
-    hx.clearRect(0, 0, HW, HH);
-    hx.globalCompositeOperation = 'lighter';
-    hx.fillStyle = '#ff4f86';
-    for (const p of pts) {
-      const d = Math.hypot(p.x, p.y) / 17;  // inner particles move less, the rim swells most
-      const k = 1 + .09 * b * (.4 + d);
-      const j = reduce ? 0 : (Math.random() - .5) * (.6 + b * 1.4);
-      hx.globalAlpha = p.a;
-      hx.fillRect(cx + p.x * S * k + j, cy + p.y * S * k + j, p.s, p.s);
-    }
-    // loose halo that grows with each beat
-    const halo = reduce ? 0 : (260 + 520 * b) | 0;
-    hx.fillStyle = '#ff9bbd';
-    for (let i = 0; i < halo; i++) {
-      const [x, y] = heartXY(Math.random() * Math.PI * 2);
-      const k = 1.1 + .1 * b + Math.random() * .12;
-      hx.globalAlpha = .25 + Math.random() * .45;
-      hx.fillRect(cx + x * S * k + (Math.random() - .5) * S * 1.6,
-                  cy + y * S * k + (Math.random() - .5) * S * 1.6, 1.4, 1.4);
-    }
-    hx.globalAlpha = 1;
-    hx.globalCompositeOperation = 'source-over';
-    if (!reduce) requestAnimationFrame(drawHeart);
-  };
-  requestAnimationFrame(drawHeart);
-
   // ---- the big heart: particles burst out of the candle, fly in and lock into a heart, then fireworks ----
   const big = document.getElementById('big');
   const bc = document.getElementById('bigc');
