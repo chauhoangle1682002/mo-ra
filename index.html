@@ -143,6 +143,35 @@
     min-height: 1.2em;
   }
 
+  /* full-screen heart shown after the candle is blown out */
+  .big {
+    position: fixed; inset: 0; z-index: 20;
+    background: rgba(14, 10, 26, .95);
+    opacity: 0;
+    transition: opacity .6s;
+  }
+  .big.show { opacity: 1; }
+  #bigc { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .big-text {
+    position: absolute; left: 0; right: 0;
+    bottom: calc(7vh + env(safe-area-inset-bottom, 0px));
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    display: flex; flex-direction: column; align-items: center; gap: 16px;
+    opacity: 0; transform: translateY(12px);
+    transition: opacity 1.2s ease, transform 1.2s ease;
+  }
+  .big.done .big-text { opacity: 1; transform: none; }
+  .big-title {
+    margin: 0;
+    font-family: var(--font-hand);
+    font-weight: 700;
+    font-size: clamp(2.3rem, 10vw, 3.6rem);
+    color: var(--flame);
+    text-align: center;
+    text-shadow: 0 0 28px rgba(245, 183, 94, .45);
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .flame, .glow, .letter p { animation: none; }
   }
@@ -186,6 +215,14 @@
   </div>
   <p id="hint" class="hint">Ước một điều trước khi thổi nến nhé</p>
 </main>
+
+<div id="big" class="big" hidden>
+  <canvas id="bigc" aria-hidden="true"></canvas>
+  <div class="big-text">
+    <p class="big-title">Chúc mừng sinh nhật</p>
+    <button id="close" type="button">Xem lại thiệp</button>
+  </div>
+</div>
 
 <script>
 (() => {
@@ -276,26 +313,29 @@
     hc.width = HW * r; hc.height = HH * r;
     hx.setTransform(r, 0, 0, r, 0, 0);
     S = Math.min(HW / 40, HH / 36);
-    pts = [];
-    const edge = [];
-    for (let i = 0; i < 700; i++) {
+    pts = buildPoints(700, 1800, 1);
+  };
+  // points in heart units: the outline, particles bleeding inward from it, then a soft fill toward the centre
+  function buildPoints(edgeN, fillN, size) {
+    const out = [], edge = [];
+    for (let i = 0; i < edgeN; i++) {
       const [x, y] = heartXY(Math.random() * Math.PI * 2);
       edge.push([x, y]);
-      pts.push({ x, y, s: Math.random() * 1.2 + 1, a: .95 });
+      out.push({ x, y, s: (Math.random() * 1.2 + 1) * size, a: .95 });
     }
-    // particles bleeding inward from the outline, then a soft fill toward the centre
     for (const [x, y] of edge) {
       for (let j = 0; j < 2; j++) {
         const k = 1 - (-0.06 * Math.log(Math.random()));
-        pts.push({ x: x * k, y: y * k, s: Math.random() + .8, a: .8 });
+        out.push({ x: x * k, y: y * k, s: (Math.random() + .8) * size, a: .8 });
       }
     }
-    for (let i = 0; i < 1800; i++) {
+    for (let i = 0; i < fillN; i++) {
       const [x, y] = edge[(Math.random() * edge.length) | 0];
-      const k = 1 - (-0.2 * Math.log(Math.random()));
-      pts.push({ x: x * Math.max(k, 0), y: y * Math.max(k, 0), s: Math.random() * .9 + .6, a: .55 });
+      const k = Math.max(1 - (-0.2 * Math.log(Math.random())), 0);
+      out.push({ x: x * k, y: y * k, s: (Math.random() * .9 + .6) * size, a: .55 });
     }
-  };
+    return out;
+  }
   buildHeart();
   addEventListener('resize', buildHeart);
 
@@ -333,6 +373,116 @@
     if (!reduce) requestAnimationFrame(drawHeart);
   };
   requestAnimationFrame(drawHeart);
+
+  // ---- the big heart: particles burst out of the candle, fly in and lock into a heart, then fireworks ----
+  const big = document.getElementById('big');
+  const bc = document.getElementById('bigc');
+  const bx = bc.getContext('2d');
+  const ASSEMBLE = 2.3;                    // seconds until every particle has landed
+  const fwColors = ['#ff4f86', '#f5b75e', '#ff9bbd', '#fbf3ea', '#c79bff'];
+  let BW = 0, BH = 0, bigPts = [], sparks = [], bigOn = false, bigStart = 0, landed = false, nextFw = 0;
+  let origin = [0, 0];
+  const sizeBig = () => {
+    const r = Math.min(window.devicePixelRatio || 1, 2);
+    BW = bc.clientWidth; BH = bc.clientHeight;
+    bc.width = BW * r; bc.height = BH * r;
+    bx.setTransform(r, 0, 0, r, 0, 0);
+  };
+  addEventListener('resize', () => { if (bigOn) sizeBig(); });
+  const ease = u => u < .5 ? 4 * u * u * u : 1 - (-2 * u + 2) ** 3 / 2;
+  const burst = (x, y, n, speed, color) => {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, v = speed * (.4 + Math.random() * .6);
+      sparks.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 1,
+        c: color || fwColors[(Math.random() * fwColors.length) | 0] });
+    }
+  };
+
+  const openBig = () => {
+    big.hidden = false;
+    sizeBig();
+    const rc = cake.getBoundingClientRect();
+    origin = [rc.left + rc.width / 2, rc.top + rc.height * .25];
+    const spread = Math.max(BW, BH) * .55;
+    bigPts = buildPoints(1100, 2600, 1.25).map(p => {
+      const a = Math.random() * Math.PI * 2, d = 80 + Math.random() * spread;
+      return Object.assign(p, { mx: Math.cos(a) * d, my: Math.sin(a) * d - spread * .3, d: Math.random() * .7 });
+    });
+    sparks = []; landed = reduce; nextFw = 0;
+    big.classList.toggle('done', reduce);
+    requestAnimationFrame(() => big.classList.add('show'));
+    bigStart = performance.now();
+    if (!bigOn) { bigOn = true; requestAnimationFrame(drawBig); }
+  };
+  const closeBig = () => {
+    bigOn = false;
+    big.classList.remove('show');
+    setTimeout(() => { big.hidden = true; }, 600);
+  };
+  document.getElementById('close').addEventListener('click', closeBig);
+
+  const drawBig = now => {
+    if (!bigOn) return;
+    const e = reduce ? ASSEMBLE + 1 : (now - bigStart) / 1000;
+    const S = Math.min(BW * .9 / 34, BH * .58 / 30);
+    const hx0 = BW / 2, hy0 = BH * .42 - 2.5 * S;   // heart centre sits at 42% of the screen height
+    const b = e > ASSEMBLE && !reduce ? beatAt(now) : 0;
+
+    if (!landed && e >= ASSEMBLE) {
+      landed = true;
+      burst(hx0, hy0 + 2.5 * S, 320, 11, '#f5b75e');
+      burst(hx0, hy0 + 2.5 * S, 200, 7, '#ff9bbd');
+      big.classList.add('done');
+      nextFw = now + 500;
+    }
+    if (landed && !reduce && now > nextFw) {
+      burst(BW * (.1 + Math.random() * .8), BH * (.06 + Math.random() * .22), 90, 5);
+      nextFw = now + 700 + Math.random() * 900;
+    }
+
+    bx.clearRect(0, 0, BW, BH);
+    bx.globalCompositeOperation = 'lighter';
+    bx.fillStyle = '#ff4f86';
+    for (const p of bigPts) {
+      const k = 1 + .09 * b * (.4 + Math.hypot(p.x, p.y) / 17);
+      const tx = hx0 + p.x * S * k, ty = hy0 + p.y * S * k;
+      const u = Math.min(Math.max((e - p.d) / (ASSEMBLE - .7), 0), 1);
+      let x = tx, y = ty;
+      if (u < 1) {
+        // quadratic curve: candle -> a random point flung outward -> its place in the heart
+        const q = ease(u), w = 1 - q;
+        const mx = origin[0] + p.mx, my = origin[1] + p.my;
+        x = w * w * origin[0] + 2 * w * q * mx + q * q * tx;
+        y = w * w * origin[1] + 2 * w * q * my + q * q * ty;
+      }
+      const j = reduce ? 0 : (Math.random() - .5) * (.6 + b * 1.6);
+      bx.globalAlpha = u < 1 ? p.a * (.5 + .5 * u) : p.a;
+      bx.fillRect(x + j, y + j, p.s, p.s);
+    }
+    if (landed) {
+      const halo = reduce ? 0 : (500 + 900 * b) | 0;
+      bx.fillStyle = '#ff9bbd';
+      for (let i = 0; i < halo; i++) {
+        const [x, y] = heartXY(Math.random() * Math.PI * 2);
+        const k = 1.1 + .1 * b + Math.random() * .12;
+        bx.globalAlpha = .25 + Math.random() * .45;
+        bx.fillRect(hx0 + x * S * k + (Math.random() - .5) * S * 1.6,
+                    hy0 + y * S * k + (Math.random() - .5) * S * 1.6, 1.6, 1.6);
+      }
+    }
+    for (const s of sparks) {
+      s.x += s.vx; s.y += s.vy;
+      s.vx *= .965; s.vy = s.vy * .965 + .05;
+      s.life -= .011;
+      bx.globalAlpha = Math.max(s.life, 0);
+      bx.fillStyle = s.c;
+      bx.fillRect(s.x, s.y, 2.2, 2.2);
+    }
+    sparks = sparks.filter(s => s.life > 0);
+    bx.globalAlpha = 1;
+    bx.globalCompositeOperation = 'source-over';
+    requestAnimationFrame(drawBig);
+  };
 
   // ---- music box "Happy Birthday" (public domain melody) ----
   let ac = null, playing = false;
@@ -384,6 +534,7 @@
       hint.textContent = 'Điều ước đã được gửi đi rồi ✨';
       spawn(reduce ? 0 : 70, true);
       play();
+      setTimeout(openBig, 700);
     } else {
       blow.textContent = 'Thổi nến 🕯️';
       hint.textContent = 'Ước một điều trước khi thổi nến nhé';
